@@ -749,6 +749,47 @@ class FusionCommandGitUI:
         return result == adsk.core.DialogResults.DialogYes
 
 
+def _export_body_stls(design, export_dir, base_name, mesh_refinement):
+    """Export every body of every component as its own STL into a subfolder.
+
+    Occurrence proxies are used so bodies keep their assembly position.
+    Returns the list of files written.
+    """
+    folder = os.path.join(export_dir, f"{base_name}_bodies")
+    os.makedirs(folder, exist_ok=True)
+    em = design.exportManager
+    root = design.rootComponent
+    written = []
+    used_names = set()
+
+    # (component name, body) for root bodies and every occurrence's bodies
+    items = [(root.name, b) for b in root.bRepBodies]
+    for occ in root.allOccurrences:
+        items.extend((occ.component.name, b) for b in occ.bRepBodies)
+
+    for comp_name, body in items:
+        try:
+            stem = f"{_safe_base(comp_name)}_{_safe_base(body.name)}"
+            name, n = stem, 2
+            while name.lower() in used_names:
+                name = f"{stem}_{n}"
+                n += 1
+            used_names.add(name.lower())
+            path = os.path.join(folder, f"{name}.stl")
+            opts = em.createSTLExportOptions(body, path)
+            opts.meshRefinement = mesh_refinement
+            if em.execute(opts) and os.path.exists(path) and os.path.getsize(path) > 0:
+                written.append(path)
+            elif logger:
+                logger.warning("Body STL export failed/empty: %s", path)
+        except Exception:
+            if logger:
+                logger.exception("Body STL export error for '%s'", getattr(body, "name", "?"))
+    if logger:
+        logger.info("Exported %d/%d body STLs to %s", len(written), len(items), folder)
+    return written
+
+
 def export_fusion_design(
     design: adsk.fusion.Design,
     export_dir: str,
@@ -824,6 +865,10 @@ def export_fusion_design(
                 exported.append(path)
                 if logger:
                     logger.info("Exported: %s (%d bytes)", path, os.path.getsize(path))
+                if fmt == "stl":
+                    exported.extend(
+                        _export_body_stls(design, export_dir, base_name, opts.meshRefinement)
+                    )
             else:
                 target_ui_ref.messageBox(f"Export failed or empty file for {fmt}: {path}", CMD_NAME)
                 if logger:
@@ -1886,7 +1931,9 @@ class GitCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
                                 )
                                 final_paths = []
                                 for src in exported_files_paths:
-                                    dst = os.path.join(destination_root, os.path.basename(src))
+                                    # Keep subfolders (e.g. per-body STLs)
+                                    dst = os.path.join(destination_root, os.path.relpath(src, temp_dir))
+                                    os.makedirs(os.path.dirname(dst), exist_ok=True)
                                     shutil.copy2(src, dst)
                                     if not os.path.exists(dst) or os.path.getsize(dst) == 0:
                                         raise RuntimeError(f"Copied file missing/empty:\n{dst}")
@@ -1933,10 +1980,14 @@ class GitCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
                             if exported_display_names:
                                 summary_lines.append("")
                                 summary_lines.append("Exported files:")
-                                summary_lines.extend(
-                                    f" • {name}"
-                                    for name in exported_display_names
-                                )
+                                top_level = [n for n in exported_display_names if "_bodies/" not in n]
+                                body_files = [n for n in exported_display_names if "_bodies/" in n]
+                                summary_lines.extend(f" • {name}" for name in top_level)
+                                if body_files:
+                                    summary_lines.append(
+                                        f" • {len(body_files)} per-body STL files in "
+                                        f"{body_files[0].rsplit('/', 1)[0]}/"
+                                    )
                             status_notes = []
                             if git_result.get("reused_branch"):
                                 status_notes.append("Added a new commit to the existing branch.")
