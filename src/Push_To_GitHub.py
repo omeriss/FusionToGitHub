@@ -1220,6 +1220,16 @@ class GitCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
             )
             skip_pull_input.isFullWidth = False
 
+            changelog_input = flow_inputs.addBoolValueInput(
+                "writeChangelog",
+                "Write CHANGELOG.md",
+                True,
+                "",
+                False,
+            )
+            changelog_input.isFullWidth = False
+            changelog_input.tooltip = "Add an entry to CHANGELOG.md in the repo with each push."
+
             use_pat_input = flow_inputs.addBoolValueInput(
                 "useStoredPat",
                 "Use Stored Token",
@@ -1307,6 +1317,7 @@ class GitCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
                     export_input.value = export_subfolder_value
 
                 skip_pull_input.value = bool(det.get("skipPullDefault", False))
+                changelog_input.value = bool(det.get("writeChangelog", False))
                 if IS_WINDOWS:
                     use_pat_input.value = bool(det.get("useStoredPat", False))
 
@@ -1367,6 +1378,7 @@ class GitCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
                     if export_input:
                         export_input.value = ""
                     skip_pull_input.value = False
+                    changelog_input.value = False
                     if IS_WINDOWS:
                         use_pat_input.value = False
                     branch_preview_input = inputs.itemById("branchPreview")
@@ -1792,6 +1804,7 @@ class GitCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
                             return
 
                         skip_pull_selected = bool(cmd_inputs.itemById("skipPull").value)
+                        write_changelog_selected = bool(cmd_inputs.itemById("writeChangelog").value)
 
                         branch_preview_input = cmd_inputs.itemById("branchPreview")
                         branch_override_raw = branch_preview_input.value.strip() if branch_preview_input else ""
@@ -1820,6 +1833,7 @@ class GitCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
 
                         selected_repo_details["exportSubfolder"] = normalized_export_subfolder
                         selected_repo_details["skipPullDefault"] = skip_pull_selected
+                        selected_repo_details["writeChangelog"] = write_changelog_selected
                         selected_repo_details["logLevel"] = log_level_name
                         if IS_WINDOWS:
                             selected_repo_details["useStoredPat"] = use_pat_selected
@@ -1962,6 +1976,7 @@ class GitCommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
                                 base_name,
                                 branch_override=branch_override_sanitized or None,
                                 skip_pull=skip_pull_selected,
+                                write_changelog=write_changelog_selected,
                                 pat_credentials=pat_credentials,
                                 logger=logger,
                                 materialize_files=materialize_exports,

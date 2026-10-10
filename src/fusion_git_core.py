@@ -171,6 +171,7 @@ def handle_git_operations(
     *,
     branch_override: Optional[str] = None,
     skip_pull: bool = False,
+    write_changelog: bool = False,
     pat_credentials: Optional[Dict[str, str]] = None,
     logger: Optional[logging.Logger] = None,
     materialize_files: Optional[Callable[[], Sequence[str]]] = None,
@@ -387,8 +388,6 @@ def handle_git_operations(
         if materialize_files is not None:
             files_to_commit = [os.path.normpath(p) for p in (materialize_files() or [])]
 
-        changelog_file_path = os.path.join(repo_path, "CHANGELOG.md")
-        log_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         commit_msg = commit_msg_template or "Design update: {filename}"
         commit_msg = (
             commit_msg.replace("{filename}", design_basename_for_branch)
@@ -396,34 +395,37 @@ def handle_git_operations(
             .replace("{timestamp}", timestamp_str)
         )
 
-        entry_lines = [
-            f"## {log_timestamp} - {design_basename_for_branch}",
-            f"- **Branch:** `{branch_name_final}`",
-            f'- **Commit Message:** "{commit_msg}"',
-        ]
-        if files_to_commit:
-            entry_lines.append("- **Files Updated:**")
-            for f in files_to_commit:
-                try:
-                    rel_display = os.path.relpath(f, repo_path)
-                except Exception:
-                    rel_display = os.path.basename(f)
-                entry_lines.append(f"  - `{rel_display}`")
-        entry_lines.append("\n---\n")
+        if write_changelog:
+            changelog_file_path = os.path.join(repo_path, "CHANGELOG.md")
+            log_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            entry_lines = [
+                f"## {log_timestamp} - {design_basename_for_branch}",
+                f"- **Branch:** `{branch_name_final}`",
+                f'- **Commit Message:** "{commit_msg}"',
+            ]
+            if files_to_commit:
+                entry_lines.append("- **Files Updated:**")
+                for f in files_to_commit:
+                    try:
+                        rel_display = os.path.relpath(f, repo_path)
+                    except Exception:
+                        rel_display = os.path.basename(f)
+                    entry_lines.append(f"  - `{rel_display}`")
+            entry_lines.append("\n---\n")
 
-        changelog_header = "# Changelog\n\n"
-        existing = ""
-        if os.path.exists(changelog_file_path):
-            with open(changelog_file_path, "r", encoding="utf-8") as fr:
-                existing = fr.read()
-            if existing.startswith(changelog_header):
-                existing = existing[len(changelog_header) :]
-        with open(changelog_file_path, "w", encoding="utf-8") as fw:
-            fw.write(changelog_header)
-            fw.write("\n".join(entry_lines) + "\n")
-            fw.write(existing)
+            changelog_header = "# Changelog\n\n"
+            existing = ""
+            if os.path.exists(changelog_file_path):
+                with open(changelog_file_path, "r", encoding="utf-8") as fr:
+                    existing = fr.read()
+                if existing.startswith(changelog_header):
+                    existing = existing[len(changelog_header) :]
+            with open(changelog_file_path, "w", encoding="utf-8") as fw:
+                fw.write(changelog_header)
+                fw.write("\n".join(entry_lines) + "\n")
+                fw.write(existing)
 
-        files_abs = [os.path.join(repo_path, "CHANGELOG.md")] + files_to_commit
+        files_abs = ([os.path.join(repo_path, "CHANGELOG.md")] if write_changelog else []) + files_to_commit
         missing = [p for p in files_abs if not os.path.exists(p)]
         if missing:
             try:
@@ -438,7 +440,7 @@ def handle_git_operations(
                 logger.error(msg)
             return {"failed": True}
 
-        rels = ["CHANGELOG.md"]
+        rels = ["CHANGELOG.md"] if write_changelog else []
         for p in files_to_commit:
             rels.append(os.path.relpath(p, repo_path))
 
